@@ -28,8 +28,8 @@ import imageio.v2 as imageio
 
 # ── Functions YOU implement in Week 2 ────────────────────────────────────────
 from src.data.nifti_io import load_volume, apply_hu_window, to_rgb       # Week 1
-from src.data.volume_to_frames import write_frames_png                    # Week 2
-from src.data.prompts import bbox_from_mask, best_start_slice             # Week 2
+from week_2.src.data.volume_to_frames import write_frames_png                    # Week 2
+from week_2.src.data.prompts import bbox_from_mask, best_start_slice             # Week 2
 
 
 def draw_rect(img, x0, y0, x1, y1, color=(0, 255, 0), thickness=2):
