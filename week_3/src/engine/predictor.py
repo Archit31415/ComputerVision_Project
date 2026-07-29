@@ -1,5 +1,5 @@
-# [Week 3] src/engine/predictor.py
-from sam2.build_sam import build_sam2_video_predictor, build_sam2
+from pathlib import Path
+from sam2.build_sam import build_sam2, build_sam2_video_predictor
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 
 
@@ -24,7 +24,12 @@ def build_predictor(model_cfg, ckpt_path):
     Returns:
         SAM2VideoPredictor: Predictor ready for init_state.
     """
-    pass
+    predictor = build_sam2_video_predictor(
+        config_file=model_cfg,
+        ckpt_path=ckpt_path,
+        device="cuda",
+    )
+    return predictor
 
 
 def build_image_predictor(model_cfg, ckpt_path):
@@ -42,7 +47,12 @@ def build_image_predictor(model_cfg, ckpt_path):
     Returns:
         SAM2ImagePredictor
     """
-    pass
+    model = build_sam2(
+        config_file=model_cfg,
+        ckpt_path=ckpt_path,
+        device="cuda",
+    )
+    return SAM2ImagePredictor(model)
 
 
 def init_state(predictor, frames_dir):
@@ -65,4 +75,9 @@ def init_state(predictor, frames_dir):
     Returns:
         dict: SAM 2 inference state (opaque — pass directly to propagate).
     """
-    pass
+    inference_state = predictor.init_state(
+        video_path=str(frames_dir),
+        offload_video_to_cpu=True,
+        offload_state_to_cpu=True,
+    )
+    return inference_state

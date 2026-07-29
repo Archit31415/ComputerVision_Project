@@ -24,7 +24,16 @@ def add_lora_peft(image_encoder, r=8, alpha=16):
     Returns:
         image_encoder wrapped with peft LoRA adapters (modified in-place).
     """
-    pass
+    from peft import LoraConfig, get_peft_model
+
+    peft_config = LoraConfig(
+        r=r,
+        lora_alpha=alpha,
+        target_modules=["qkv"],
+        lora_dropout=0.05,
+        bias="none",
+    )
+    return get_peft_model(image_encoder, peft_config)
 
 
 # ── Option B — custom Q & V only (stretch goal, no peft dependency) ──────────
@@ -58,13 +67,25 @@ class LoRALinear(nn.Module):
 
     def __init__(self, base: nn.Linear, r=8, alpha=16, qv_only=True):
         super().__init__()
+        self.base = base
+        for param in self.base.parameters():
+            param.requires_grad = False
+
         self.qv_only = qv_only
-        # TODO: implement as described above
-        pass
+        self.r = r
+        self.scale = alpha / r
+        self.dim = base.in_features
+
+        self.A = nn.Parameter(torch.empty(r, base.in_features))
+        nn.init.kaiming_uniform_(self.A, a=5 ** 0.5)
+
+        self.B = nn.Parameter(torch.zeros(base.out_features, r))
 
     def forward(self, x):
-        # TODO: implement as described above
-        pass
+        delta = (x @ self.A.t()) @ self.B.t() * self.scale
+        if self.qv_only:
+            delta[..., self.dim : 2 * self.dim] = 0.0
+        return self.base(x) + delta
 
 
 def inject_lora_qv(model, r=8, alpha=16):
@@ -85,7 +106,15 @@ def inject_lora_qv(model, r=8, alpha=16):
     Returns:
         model with all QKV linears replaced by LoRALinear (modified in-place).
     """
-    pass
+    for name, module in list(model.named_modules()):
+        if hasattr(module, "attn") and hasattr(module.attn, "qkv"):
+            if isinstance(module.attn.qkv, nn.Linear):
+                module.attn.qkv = LoRALinear(module.attn.qkv, r=r, alpha=alpha, qv_only=True)
+
+        elif hasattr(module, "qkv") and isinstance(module.qkv, nn.Linear):
+            module.qkv = LoRALinear(module.qkv, r=r, alpha=alpha, qv_only=True)
+
+    return model
 
 
 def trainable_report(model):
@@ -100,4 +129,8 @@ def trainable_report(model):
     Args:
         model: Any nn.Module (typically predictor.model after LoRA injection).
     """
-    pass
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model.parameters())
+    pct = (trainable / total * 100) if total > 0 else 0.0
+
+    print(f"Trainable: {trainable:,} / {total:,} = {pct:.3f}%")

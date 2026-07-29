@@ -46,7 +46,7 @@ set_seed(42)
 import yaml
 
 # ── Functions YOU implement in Week 5 ────────────────────────────────────────
-from src.eval.evaluate import evaluate_organ, print_table
+from week_5.src.eval.evaluate import evaluate_organ, print_table
 
 
 def main():

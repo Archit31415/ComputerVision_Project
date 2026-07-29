@@ -42,4 +42,40 @@ def propagate_bidirectional(predictor, state, start_z, bbox, target_hw=None):
     Returns:
         np.ndarray: bool array of shape (H, W, Z) — the full 3-D organ mask.
     """
-    pass
+    predictor.add_new_points_or_box(
+        state,
+        frame_idx=start_z,
+        obj_id=1,
+        box=bbox,
+    )
+
+    slice_masks = {}
+
+    def process_and_store_mask(frame_idx, mask_tensor):
+        """Helper to threshold, optionally resize, and store mask in slice_masks."""
+        mask_bool = (mask_tensor > 0).cpu().numpy()  # shape: (h, w)
+
+        if target_hw is not None and mask_bool.shape != target_hw:
+            target_h, target_w = target_hw
+            img = Image.fromarray(mask_bool)
+            resized_img = img.resize((target_w, target_h), resample=Image.NEAREST)
+            mask_bool = np.array(resized_img, dtype=bool)
+
+        slice_masks[frame_idx] = mask_bool
+
+    for frame_idx, obj_ids, masks in predictor.propagate_in_video(
+        state, start_frame_idx=start_z, reverse=False
+    ):
+        process_and_store_mask(frame_idx, masks[0, 0])
+
+    for frame_idx, obj_ids, masks in predictor.propagate_in_video(
+        state, start_frame_idx=start_z, reverse=True
+    ):
+        if frame_idx not in slice_masks:
+            process_and_store_mask(frame_idx, masks[0, 0])
+
+    num_slices = len(slice_masks)
+    sorted_frames = [slice_masks[z] for z in range(num_slices)]
+    mask_3d = np.stack(sorted_frames, axis=2)
+
+    return mask_3d

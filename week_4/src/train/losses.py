@@ -22,7 +22,12 @@ def dice_loss(logits, targets, eps=1e-6):
     Returns:
         Tensor: Scalar soft Dice loss with gradient.
     """
-    pass
+    p = torch.sigmoid(logits)
+    inter = (p * targets).sum()
+    union = p.sum() + targets.sum()
+
+    dice_coeff = (2.0 * inter + eps) / (union + eps)
+    return 1.0 - dice_coeff
 
 
 def total_loss(logits, targets):
@@ -41,4 +46,6 @@ def total_loss(logits, targets):
     Returns:
         Tensor: Scalar combined loss with gradient.
     """
-    pass
+    d_loss = dice_loss(logits, targets)
+    bce_loss = F.binary_cross_entropy_with_logits(logits, targets)
+    return d_loss + bce_loss

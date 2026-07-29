@@ -1,20 +1,20 @@
 # [Week 4] src/train/train.py
 # Dependencies: src/train/losses.py (Week 4), src/data/dataset.py (Week 2)
+from pathlib import Path
 import torch
 import torch.nn.functional as F
-from pathlib import Path
 from torch.utils.data import DataLoader
 
 from src.train.losses import total_loss
 
 _MEAN = torch.tensor([0.485, 0.456, 0.406])
-_STD  = torch.tensor([0.229, 0.224, 0.225])
+_STD = torch.tensor([0.229, 0.224, 0.225])
 
 
 def _normalize(img_t):
     """Normalise (B, 3, H, W) float [0,1] tensor to ImageNet mean/std. (complete — do not change)"""
     mean = _MEAN.to(img_t.device).view(1, 3, 1, 1)
-    std  = _STD.to(img_t.device).view(1, 3, 1, 1)
+    std = _STD.to(img_t.device).view(1, 3, 1, 1)
     return (img_t - mean) / std
 
 
@@ -68,7 +68,42 @@ def forward_prompted(model, img_t_norm, box_batch, image_size):
     Returns:
         Tensor: (B, H, W) logit tensor with gradient attached.
     """
-    pass
+    batch_size = img_t_norm.shape[0]
+
+    backbone_out = model.forward_image(img_t_norm)
+    _, vision_feats, _, feat_sizes = model._prepare_backbone_features(backbone_out)
+
+    feats = [
+        f.permute(1, 2, 0).view(batch_size, -1, *sz)
+        for f, sz in zip(vision_feats[::-1], feat_sizes[::-1])
+    ]
+    feats = feats[::-1] 
+    image_embed = feats[-1] 
+    high_res_feats = feats[:-1] 
+
+    box_t = box_batch.to(img_t_norm.device).view(batch_size, 1, 4)
+    sparse_emb, dense_emb = model.sam_prompt_encoder(
+        points=None, boxes=box_t, masks=None
+    )
+
+    dec_kwargs = dict(
+        image_embeddings=image_embed,
+        image_pe=model.sam_prompt_encoder.get_dense_pe(),
+        sparse_prompt_embeddings=sparse_emb,
+        dense_prompt_embeddings=dense_emb,
+        multimask_output=False,
+        repeat_image=False,
+    )
+    if high_res_feats:
+        dec_kwargs["high_res_features"] = high_res_feats
+
+    low_res_masks = model.sam_mask_decoder(**dec_kwargs)[0]  
+
+    logits = F.interpolate(
+        low_res_masks, (image_size, image_size), mode="bilinear", align_corners=False
+    ).squeeze(1)
+
+    return logits
 
 
 def lora_state_dict(model):
@@ -88,7 +123,11 @@ def lora_state_dict(model):
     Returns:
         dict: Filtered state dict containing only LoRA weight tensors.
     """
-    pass
+    filtered_sd = {}
+    for k, v in model.image_encoder.state_dict().items():
+        if any(substring in k for substring in [".A", ".B", "lora_A", "lora_B"]):
+            filtered_sd[k] = v
+    return filtered_sd
 
 
 def run_training(cfg, model, dataset, organ_id, save_path):
@@ -146,4 +185,64 @@ def run_training(cfg, model, dataset, organ_id, save_path):
     Returns:
         list[float]: Mean training loss per epoch.
     """
-    pass
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    loader = DataLoader(
+        dataset,
+        batch_size=cfg["train"]["micro_batch"],
+        shuffle=True,
+        num_workers=0,
+        pin_memory=False,
+    )
+
+    trainable = [p for p in model.parameters() if p.requires_grad]
+    opt = torch.optim.AdamW(trainable, lr=float(cfg["train"]["lr"]))
+
+    scaler = torch.cuda.amp.GradScaler(enabled=cfg["train"]["amp"])
+
+    opt.zero_grad(set_to_none=True)
+
+    epoch_losses = []
+    accum_steps = cfg["train"]["accum_steps"]
+    epochs = cfg["train"]["epochs"]
+    image_size = cfg["model"]["image_size"]
+
+    for epoch in range(epochs):
+        model.train()
+        total_epoch_loss = 0.0
+        num_batches = 0
+
+        for step, (img, gt, box) in enumerate(loader):
+            img_t = _normalize(img.permute(0, 3, 1, 2).float().to(device))
+            gt = gt.to(device, dtype=torch.float32)
+            box = box.to(device)
+
+            with torch.amp.autocast("cuda",
+                enabled=cfg["train"]["amp"], dtype=torch.bfloat16
+            ):
+                logits = forward_prompted(model, img_t, box, image_size)
+                loss_scaled = total_loss(logits, gt) / accum_steps
+
+            scaler.scale(loss_scaled).backward()
+
+            total_epoch_loss += loss_scaled.item() * accum_steps
+            num_batches += 1
+
+            if (step + 1) % accum_steps == 0:
+                scaler.step(opt)
+                scaler.update()
+                opt.zero_grad(set_to_none=True)
+
+        if (len(loader) % accum_steps) != 0:
+            scaler.step(opt)
+            scaler.update()
+            opt.zero_grad(set_to_none=True)
+
+        mean_loss = total_epoch_loss / max(1, num_batches)
+        epoch_losses.append(mean_loss)
+        print(f"Organ {organ_id} | Epoch {epoch + 1}/{epochs} | Loss: {mean_loss:.4f}")
+
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+    torch.save(lora_state_dict(model), save_path)
+
+    return epoch_losses
