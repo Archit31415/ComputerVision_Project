@@ -37,7 +37,7 @@ import csv
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Fix #9: seed before any torch imports
 from src.utils.seed import set_seed
@@ -45,8 +45,7 @@ set_seed(42)
 
 import yaml
 
-# ── Functions YOU implement in Week 5 ────────────────────────────────────────
-from week_5.src.eval.evaluate import evaluate_organ, print_table
+from src.eval.evaluate import evaluate_organ, print_table
 
 
 def main():

@@ -3,19 +3,33 @@ import numpy as np
 from scipy.ndimage import zoom
 
 
+def load_volume_sitk(path):
+    """Fallback reader to load a NIfTI file using SimpleITK.
+
+    Args:
+        path: path to a .nii or .nii.gz file
+
+    Returns:
+        vol     : float32 numpy array of shape (H, W, Z)
+        affine  : 4x4 identity matrix fallback
+        spacing : tuple (sx, sy, sz) — voxel size in mm
+    """
+    try:
+        import SimpleITK as sitk
+
+        sitk_img = sitk.ReadImage(str(path))
+        vol = sitk.GetArrayFromImage(sitk_img).astype(np.float32)
+        # SimpleITK loads in (Z, Y, X) order -> transpose to (X, Y, Z) / (H, W, Z)
+        vol = np.transpose(vol, (2, 1, 0))
+        spacing = tuple(float(s) for s in sitk_img.GetSpacing()[:3])
+        affine = np.eye(4, dtype=np.float32)
+        return vol, affine, spacing
+    except Exception as e:
+        raise RuntimeError(f"SimpleITK failed to load {path}: {e}")
+
+
 def load_volume(path):
     """Load a NIfTI file and return the 3D volume, affine, and voxel spacing.
-
-    TODO:
-    1. Load the file:   img = nib.load(path)
-    2. Reorient to standard axes so axis-2 is always axial (z):
-           img = nib.as_closest_canonical(img)
-    3. Get the numpy array:  vol = img.get_fdata().astype(np.float32)
-    4. Read voxel spacing in mm from the header:
-           spacing = tuple(float(z) for z in img.header.get_zooms()[:3])
-       IMPORTANT: CT is anisotropic — x/y spacing ≈ 1 mm, z spacing ≈ 3-5 mm.
-       Print spacing when you first load a volume so you can see this.
-    5. Return (vol, img.affine, spacing)
 
     Args:
         path: path to a .nii or .nii.gz file
@@ -25,17 +39,19 @@ def load_volume(path):
         affine  : 4x4 affine matrix from the NIfTI header
         spacing : tuple (sx, sy, sz) — voxel size in mm
     """
+    try:
+        img = nib.load(path)
+        img = nib.as_closest_canonical(img)
+        vol = img.get_fdata().astype(np.float32)
+        spacing = tuple(float(z) for z in img.header.get_zooms()[:3])
+        affine = img.affine
+    except Exception as err:
+        print(f"nibabel failed to load {path} ({err}). Falling back to SimpleITK...")
+        vol, affine, spacing = load_volume_sitk(path)
 
-    img = nib.load(path)
-
-    img = nib.as_closest_canonical(img)
-
-    vol = img.get_fdata().astype(np.float32)
-
-    spacing = tuple(float(z) for z in img.header.get_zooms()[:3])
     print(f"Loaded volume: {path} | Spacing: {spacing}")
 
-    return vol, img.affine, spacing
+    return vol, affine, spacing
 
 
 

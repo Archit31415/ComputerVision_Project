@@ -6,42 +6,23 @@ from torch.utils.data import Dataset
 from pathlib import Path
 from PIL import Image
 
-from src.data.nifti_io import load_volume, apply_hu_window
+from src.data.nifti_io import load_volume, apply_hu_window, to_rgb, resample_isotropic
 from src.data.prompts import bbox_from_mask
-
-from matplotlib.colors import to_rgb
 
 
 class BTCVSliceDataset(Dataset):
-    """2-D prompted dataset of organ-containing axial slices for LoRA training.
+    """2-D prompted dataset of organ-containing axial slices for LoRA training."""
 
-    Specification:
-    __init__:
-    - Iterate over every case in `cases`.
-    - Load image and label volumes from image_dir/img<case>.nii and
-      label_dir/label<case>.nii (replace 'img' with 'label' in the stem).
-    - For each z-slice where organ_id is present:
-        * HU-window and convert the image slice to uint8 RGB (H, W, 3).
-        * Resize image to (image_size, image_size) using PIL BILINEAR.
-        * Extract the binary GT mask; resize with PIL NEAREST to preserve labels.
-        * Compute bbox_from_mask on the resized GT; skip if None.
-        * Store (resized_img_array, resized_gt_array, bbox_array) in self.samples.
-
-    __getitem__(idx):
-    - Return (img_tensor, gt_tensor, box_tensor) where:
-        img_tensor : torch.float32, shape (image_size, image_size, 3), range [0, 1]
-        gt_tensor  : torch.float32, shape (image_size, image_size), binary 0/1
-        box_tensor : torch.float32, shape (4,), [x0, y0, x1, y1]
-
-    Args:
-        cases      (list[str]):  Case stem names, e.g. ['img0001', 'img0002'].
-        organ_id   (int):        BTCV integer label for the target organ.
-        image_dir  (str | Path): Folder containing img*.nii files.
-        label_dir  (str | Path): Folder containing label*.nii files.
-        image_size (int):        Square spatial size for resizing (default 1024).
-    """
-
-    def __init__(self, cases, organ_id, image_dir, label_dir, image_size=1024):
+    def __init__(
+        self,
+        cases,
+        organ_id,
+        image_dir,
+        label_dir,
+        image_size=1024,
+        do_resample=False,
+        target_spacing=1.5,
+    ):
         self.samples = []
         image_dir = Path(image_dir)
         label_dir = Path(label_dir)
@@ -56,8 +37,16 @@ class BTCVSliceDataset(Dataset):
             if not label_path.exists():
                 label_path = label_dir / f"label{clean_case}.nii.gz"
 
-            vol_img, _, _ = load_volume(img_path)
+            vol_img, _, spacing = load_volume(img_path)
             vol_lbl, _, _ = load_volume(label_path)
+
+            if do_resample:
+                vol_img, spacing = resample_isotropic(
+                    vol_img, spacing, target=target_spacing, order=1
+                )
+                vol_lbl, _ = resample_isotropic(
+                    vol_lbl, spacing, target=target_spacing, order=0
+                )
 
             vol_img_u8 = apply_hu_window(vol_img, lo=-150, hi=250, as_uint8=True)
 

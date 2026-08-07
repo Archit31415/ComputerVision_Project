@@ -70,6 +70,9 @@ def forward_prompted(model, img_t_norm, box_batch, image_size):
     """
     batch_size = img_t_norm.shape[0]
 
+    # Ensure the input tensor matches torch.cuda.FloatTensor
+    img_t_norm = img_t_norm.type(torch.cuda.FloatTensor)
+
     backbone_out = model.forward_image(img_t_norm)
     _, vision_feats, _, feat_sizes = model._prepare_backbone_features(backbone_out)
 
@@ -125,7 +128,7 @@ def lora_state_dict(model):
     """
     filtered_sd = {}
     for k, v in model.image_encoder.state_dict().items():
-        if any(substring in k for substring in [".A", ".B", "lora_A", "lora_B"]):
+        if any(substring in k for substring in [".A", ".B", "lora_A", "lora_B", "sd_adapter"]):
             filtered_sd[k] = v
     return filtered_sd
 
@@ -186,6 +189,7 @@ def run_training(cfg, model, dataset, organ_id, save_path):
         list[float]: Mean training loss per epoch.
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
 
     loader = DataLoader(
         dataset,
@@ -198,7 +202,8 @@ def run_training(cfg, model, dataset, organ_id, save_path):
     trainable = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.AdamW(trainable, lr=float(cfg["train"]["lr"]))
 
-    scaler = torch.cuda.amp.GradScaler(enabled=cfg["train"]["amp"])
+    # GradScaler is disabled because we are training in full float32 precision.
+    scaler = torch.amp.GradScaler("cuda", enabled=False)
 
     opt.zero_grad(set_to_none=True)
 
@@ -213,12 +218,12 @@ def run_training(cfg, model, dataset, organ_id, save_path):
         num_batches = 0
 
         for step, (img, gt, box) in enumerate(loader):
-            img_t = _normalize(img.permute(0, 3, 1, 2).float().to(device))
-            gt = gt.to(device, dtype=torch.float32)
-            box = box.to(device)
+            img_t = _normalize(img.permute(0, 3, 1, 2).type(torch.cuda.FloatTensor))
+            gt = gt.type(torch.cuda.FloatTensor)
+            box = box.type(torch.cuda.FloatTensor)
 
             with torch.amp.autocast("cuda",
-                enabled=cfg["train"]["amp"], dtype=torch.bfloat16
+                enabled=False
             ):
                 logits = forward_prompted(model, img_t, box, image_size)
                 loss_scaled = total_loss(logits, gt) / accum_steps

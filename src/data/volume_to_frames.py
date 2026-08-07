@@ -5,31 +5,19 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from src.data.nifti_io import load_volume, apply_hu_window, to_rgb
+from src.data.nifti_io import load_volume, apply_hu_window, to_rgb, resample_isotropic
 
 
-def write_frames_png(nifti_path, out_dir):
-    """Convert every axial slice of a CT volume to a numbered PNG file on disk.
-
-    Specification:
-    - Load and HU-window the volume using Week 1 utilities.
-    - Convert each (H, W) greyscale slice to (H, W, 3) RGB via to_rgb().
-    - Save as PNG named 00000.png, 00001.png, … (5-digit zero-padded index = z).
-    - Create out_dir if it does not exist.
-    - SAM 2's video predictor reads this exact folder structure.
-
-    Args:
-        nifti_path (str | Path): Source .nii or .nii.gz file.
-        out_dir    (str | Path): Destination folder for PNG frames.
-
-    Returns:
-        int: Number of PNGs written (equals the Z depth of the volume).
-    """
+def write_frames_png(nifti_path, out_dir, do_resample=False, target_spacing=1.5):
+    """Convert every axial slice of a CT volume to a numbered PNG file on disk."""
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    vol, _, _ = load_volume(nifti_path)
+    vol, _, spacing = load_volume(nifti_path)
+
+    if do_resample:
+        vol, _ = resample_isotropic(vol, spacing, target=target_spacing, order=1)
 
     vol_u8 = apply_hu_window(vol, lo=-150, hi=250, as_uint8=True)
 

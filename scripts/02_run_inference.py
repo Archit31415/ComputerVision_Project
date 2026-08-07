@@ -24,7 +24,7 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import yaml
 import numpy as np
@@ -88,7 +88,33 @@ def main():
     if args.lora:
         import torch
         ckpt = torch.load(args.lora, map_location="cuda")
+        
+        # Dynamically detect and inject active adapters based on checkpoint keys
+        has_sd = any("sd_adapter" in k for k in ckpt.keys())
+        has_peft = any("base_model" in k for k in ckpt.keys())
+        has_custom_qv = any(not "base_model" in k and (".A" in k or ".B" in k) for k in ckpt.keys())
+
+        if has_sd:
+            from src.train.adapters import inject_sd_adapters
+            predictor.model.image_encoder = inject_sd_adapters(predictor.model.image_encoder)
+        
+        if has_peft:
+            from src.train.lora import add_lora_peft
+            predictor.model.image_encoder = add_lora_peft(
+                predictor.model.image_encoder,
+                r=cfg["train"]["rank"],
+                alpha=cfg["train"]["alpha"]
+            )
+        elif has_custom_qv:
+            from src.train.lora import inject_lora_qv
+            predictor.model.image_encoder = inject_lora_qv(
+                predictor.model.image_encoder,
+                r=cfg["train"]["rank"],
+                alpha=cfg["train"]["alpha"]
+            )
+
         predictor.model.image_encoder.load_state_dict(ckpt, strict=False)
+        predictor.model.to("cuda")
         print(f"Loaded LoRA adapter from {args.lora}")
 
     # ── Step 4: Initialise video state ───────────────────────────────────────

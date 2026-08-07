@@ -68,3 +68,23 @@ def hd95(pred3d, gt3d, spacing):
 
     dist = compute_hausdorff_distance(p, g, percentile=95, spacing=sp_zyx)
     return float(dist.squeeze())
+
+
+def vpe(pred3d, gt3d, spacing):
+    """Volumetric Prediction Error (vpe) in cubic centimetres (cm³).
+
+    Formula: VPE = |Vol_pred - Vol_gt|
+    where Vol = voxel_count * (sx * sy * sz) / 1000.0
+
+    Args:
+        pred3d  (np.ndarray): 3-D bool predicted mask, shape (H, W, Z).
+        gt3d    (np.ndarray): 3-D bool ground-truth mask, shape (H, W, Z).
+        spacing (tuple):      (sx, sy, sz) voxel size in mm from load_volume().
+
+    Returns:
+        float: Absolute volume error in cm³.
+    """
+    voxel_vol_cm3 = (float(spacing[0]) * float(spacing[1]) * float(spacing[2])) / 1000.0
+    pred_vol = float(pred3d.astype(bool).sum()) * voxel_vol_cm3
+    gt_vol = float(gt3d.astype(bool).sum()) * voxel_vol_cm3
+    return abs(pred_vol - gt_vol)

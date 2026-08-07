@@ -10,7 +10,7 @@ paths:
 
 model:
   size: tiny
-  cfg:  sam2.1_hiera_t.yaml       # config passed to build_sam2_video_predictor
+  cfg:  configs/sam2.1/sam2.1_hiera_t.yaml       # config passed to build_sam2_video_predictor
   ckpt: checkpoints/sam2.1_hiera_tiny.pt
   image_size: 1024                # reduce to 512 if training OOMs on 8 GB
 
@@ -19,6 +19,8 @@ preprocess:
   hu_high:  250
   resample_isotropic: false
   target_spacing_mm: 1.5
+  min_area_pixels: 5
+  short_memory_slices: 3
 
 organs:                           # BTCV integer label ids
   spleen:   1

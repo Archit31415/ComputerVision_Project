@@ -5,12 +5,12 @@ import numpy as np
 import torch
 
 from src.data.nifti_io import apply_hu_window, load_volume
-from week_2.src.data.prompts import bbox_from_mask, best_start_slice
-from week_2.src.data.volume_to_frames import write_frames_png
-from week_3.src.engine.predictor import build_predictor, init_state
-from week_3.src.engine.propagate import propagate_bidirectional
-from week_4.src.eval.metrics import dice_score, hd95
-from week_2.src.utils.viz import save_overlay_gif
+from src.data.prompts import bbox_from_mask, best_start_slice
+from src.data.volume_to_frames import write_frames_png
+from src.engine.predictor import build_predictor, init_state
+from src.engine.propagate import propagate_bidirectional
+from src.eval.metrics import dice_score, hd95, vpe
+from src.utils.viz import save_overlay_gif
 
 
 def _load_predictor(cfg, lora_path=None):
@@ -36,7 +36,33 @@ def _load_predictor(cfg, lora_path=None):
         lora_file = Path(lora_path)
         if lora_file.exists():
             adapter = torch.load(lora_file, map_location="cuda")
+            
+            # Dynamically detect and inject active adapters based on checkpoint keys
+            has_sd = any("sd_adapter" in k for k in adapter.keys())
+            has_peft = any("base_model" in k for k in adapter.keys())
+            has_custom_qv = any(not "base_model" in k and (".A" in k or ".B" in k) for k in adapter.keys())
+
+            if has_sd:
+                from src.train.adapters import inject_sd_adapters
+                predictor.model.image_encoder = inject_sd_adapters(predictor.model.image_encoder)
+            
+            if has_peft:
+                from src.train.lora import add_lora_peft
+                predictor.model.image_encoder = add_lora_peft(
+                    predictor.model.image_encoder,
+                    r=cfg["train"]["rank"],
+                    alpha=cfg["train"]["alpha"]
+                )
+            elif has_custom_qv:
+                from src.train.lora import inject_lora_qv
+                predictor.model.image_encoder = inject_lora_qv(
+                    predictor.model.image_encoder,
+                    r=cfg["train"]["rank"],
+                    alpha=cfg["train"]["alpha"]
+                )
+
             predictor.model.image_encoder.load_state_dict(adapter, strict=False)
+            predictor.model.to("cuda")
 
     return predictor
 
@@ -148,13 +174,13 @@ def evaluate_organ(cfg, organ_id, lora_path=None):
         )
         dsc_zs = dice_score(mask_zs, gt3d)
         hd_zs = hd95(mask_zs, gt3d, spacing)
+        vpe_zs = vpe(mask_zs, gt3d, spacing)
 
         save_overlay_gif(
             vol_u8,
             mask_zs,
-            gt3d,
             str(out_dir / f"zeroshot_{organ_id}.gif"),
-            prompt_z=start_z,
+            gt3d,
         )
 
         if pred_lora is not None:
@@ -164,25 +190,28 @@ def evaluate_organ(cfg, organ_id, lora_path=None):
             )
             dsc_lo = dice_score(mask_lo, gt3d)
             hd_lo = hd95(mask_lo, gt3d, spacing)
+            vpe_lo = vpe(mask_lo, gt3d, spacing)
 
             save_overlay_gif(
                 vol_u8,
                 mask_lo,
-                gt3d,
                 str(out_dir / f"lora_{organ_id}.gif"),
-                prompt_z=start_z,
+                gt3d,
             )
         else:
             dsc_lo = float("nan")
             hd_lo = float("nan")
+            vpe_lo = float("nan")
 
         results.append(
             dict(
                 case=case,
                 dsc_zs=dsc_zs,
                 hd95_zs=hd_zs,
+                vpe_zs=vpe_zs,
                 dsc_lora=dsc_lo,
                 hd95_lora=hd_lo,
+                vpe_lora=vpe_lo,
             )
         )
 
@@ -219,14 +248,19 @@ def print_table(rows, organ_id):
 
     dsc_zs_vals = [r["dsc_zs"] for r in rows]
     hd95_zs_vals = [r["hd95_zs"] for r in rows]
+    vpe_zs_vals = [r["vpe_zs"] for r in rows]
+
     dsc_lo_vals = [r["dsc_lora"] for r in rows]
     hd95_lo_vals = [r["hd95_lora"] for r in rows]
+    vpe_lo_vals = [r["vpe_lora"] for r in rows]
 
     dsc_zs_m, dsc_zs_s = np.nanmean(dsc_zs_vals), np.nanstd(dsc_zs_vals)
     hd95_zs_m, hd95_zs_s = np.nanmean(hd95_zs_vals), np.nanstd(hd95_zs_vals)
+    vpe_zs_m, vpe_zs_s = np.nanmean(vpe_zs_vals), np.nanstd(vpe_zs_vals)
 
     dsc_lo_m, dsc_lo_s = np.nanmean(dsc_lo_vals), np.nanstd(dsc_lo_vals)
     hd95_lo_m, hd95_lo_s = np.nanmean(hd95_lo_vals), np.nanstd(hd95_lo_vals)
+    vpe_lo_m, vpe_lo_s = np.nanmean(vpe_lo_vals), np.nanstd(vpe_lo_vals)
 
     print("=" * 60)
     print(f"  Organ {organ_id}  |  {n} val cases")
@@ -238,6 +272,9 @@ def print_table(rows, organ_id):
     )
     print(
         f"  HD95 (mm)      {hd95_zs_m:.1f}  ± {hd95_zs_s:.1f}   {hd95_lo_m:.1f}  ± {hd95_lo_s:.1f}"
+    )
+    print(
+        f"  VPE (cm³)      {vpe_zs_m:.2f}  ± {vpe_zs_s:.2f}   {vpe_lo_m:.2f}  ± {vpe_lo_s:.2f}"
     )
     print("=" * 60)
 
@@ -251,4 +288,8 @@ def print_table(rows, organ_id):
         hd95_zs_std=hd95_zs_s,
         hd95_lora_mean=hd95_lo_m,
         hd95_lora_std=hd95_lo_s,
+        vpe_zs_mean=vpe_zs_m,
+        vpe_zs_std=vpe_zs_s,
+        vpe_lora_mean=vpe_lo_m,
+        vpe_lora_std=vpe_lo_s,
     )

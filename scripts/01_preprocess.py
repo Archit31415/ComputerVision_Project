@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 # Allow imports from project root
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import yaml
 import numpy as np
@@ -28,8 +28,8 @@ import imageio.v2 as imageio
 
 # ── Functions YOU implement in Week 2 ────────────────────────────────────────
 from src.data.nifti_io import load_volume, apply_hu_window, to_rgb       # Week 1
-from week_2.src.data.volume_to_frames import write_frames_png                    # Week 2
-from week_2.src.data.prompts import bbox_from_mask, best_start_slice             # Week 2
+from src.data.volume_to_frames import write_frames_png
+from src.data.prompts import bbox_from_mask, best_start_slice
 
 
 def draw_rect(img, x0, y0, x1, y1, color=(0, 255, 0), thickness=2):
@@ -65,7 +65,16 @@ def main():
     # ── Step 2: Write PNG frames (one per axial slice) ───────────────────────
     # write_frames_png() creates out_dir/00000.png, 00001.png, ...
     # Returns the number of frames written.
-    n = write_frames_png(str(img_path), str(out_dir))
+    do_resample = cfg.get("preprocess", {}).get("resample_isotropic", False)
+    target_spacing = cfg.get("preprocess", {}).get("target_spacing_mm", 1.5)
+
+    n = write_frames_png(
+        str(img_path),
+        str(out_dir),
+        do_resample=do_resample,
+        target_spacing=target_spacing,
+    )
+
     print(f"  Wrote {n} PNG frames -> {out_dir}")
 
     if not lbl_path.exists():

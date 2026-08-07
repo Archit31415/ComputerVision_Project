@@ -26,7 +26,7 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Fix #9: seed before ANY torch / numpy import
 from src.utils.seed import set_seed
@@ -42,7 +42,9 @@ from src.engine.predictor import build_predictor
 
 # ── Functions YOU implement in Week 4 ────────────────────────────────────────
 from src.train.lora import add_lora_peft, inject_lora_qv, trainable_report
+from src.train.adapters import inject_sd_adapters
 from src.train.train import run_training
+
 
 
 def main():
@@ -51,6 +53,8 @@ def main():
                         help="BTCV organ label (6=liver, 1=spleen, 11=pancreas)")
     parser.add_argument("--qv-only", action="store_true",
                         help="Use custom Q&V-only LoRA (Option B) instead of peft")
+    parser.add_argument("--sd-adapter", action="store_true",
+                        help="Inject Space-Depth (SD-Trans) Adapters into vision encoder")
     parser.add_argument("--config",  default="configs/default.yaml")
     args = parser.parse_args()
 
@@ -60,7 +64,10 @@ def main():
     # ── Step 1: Build model and inject LoRA ──────────────────────────────────
     # build_predictor() returns a SAM2VideoPredictor; .model is the SAM2Base.
     predictor = build_predictor(cfg["model"]["cfg"], cfg["model"]["ckpt"])
-    model     = predictor.model
+    model     = predictor
+
+    if args.sd_adapter:
+        model.image_encoder = inject_sd_adapters(model.image_encoder)
 
     if args.qv_only:
         # Option B: custom LoRALinear — Q and V projections only (stretch goal)
@@ -76,6 +83,7 @@ def main():
 
     # Sanity check: trainable params should be well under 1% of total
     trainable_report(model)
+
 
     # ── Step 2: Build dataset (training split only, no val cases) ────────────
     # BTCVSliceDataset yields (image, gt_mask, bbox) for each slice with organ.
