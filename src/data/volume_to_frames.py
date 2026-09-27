@@ -1,6 +1,3 @@
-# [Week 2] src/data/volume_to_frames.py
-# Dependency: src/data/nifti_io.py (Week 1)
-import os
 from pathlib import Path
 import numpy as np
 from PIL import Image
@@ -8,9 +5,8 @@ from PIL import Image
 from src.data.nifti_io import load_volume, apply_hu_window, to_rgb, resample_isotropic
 
 
+# Slices 3D volumes into sequential JPEG frames to match SAM 2's video predictor input specification.
 def write_frames_png(nifti_path, out_dir, do_resample=False, target_spacing=1.5):
-    """Convert every axial slice of a CT volume to a numbered PNG file on disk."""
-
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -24,35 +20,18 @@ def write_frames_png(nifti_path, out_dir, do_resample=False, target_spacing=1.5)
     z_depth = vol_u8.shape[2]
     for z in range(z_depth):
         slice_2d = vol_u8[:, :, z]
-        
         slice_rgb = to_rgb(slice_2d)
-        
         frame_name = f"{z:05d}.jpg"
         frame_path = out_dir / frame_name
-        
         Image.fromarray(slice_rgb).save(frame_path, quality=95)
 
     return z_depth
 
 
 def frames_to_arrays(frames_dir):
-    """Load all PNG frames from a folder into a single uint8 numpy array.
-
-    Specification:
-    - Read every .jpg in frames_dir in sorted (filename) order.
-    - Stack along a new leading axis → shape (Z, H, W, 3).
-
-    Args:
-        frames_dir (str | Path): Folder produced by write_frames_png.
-
-    Returns:
-        np.ndarray: uint8 array of shape (Z, H, W, 3).
-    """
-
     frames_dir = Path(frames_dir)
-    
     frame_paths = sorted(frames_dir.glob("*.jpg"))
-    
+
     if not frame_paths:
         return np.empty((0, 0, 0, 3), dtype=np.uint8)
 

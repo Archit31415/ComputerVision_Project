@@ -1,18 +1,14 @@
-# [Week 2] src/data/dataset.py
-# Dependency: src/data/nifti_io.py (Week 1), src/data/prompts.py (Week 2)
+from pathlib import Path
 import numpy as np
+from PIL import Image
 import torch
 from torch.utils.data import Dataset
-from pathlib import Path
-from PIL import Image
 
 from src.data.nifti_io import load_volume, apply_hu_window, to_rgb, resample_isotropic
 from src.data.prompts import bbox_from_mask
 
-
+# Dataset extracts 2D axial slices containing the target organ and computes bounding box prompts for training.
 class BTCVSliceDataset(Dataset):
-    """2-D prompted dataset of organ-containing axial slices for LoRA training."""
-
     def __init__(
         self,
         cases,
@@ -56,7 +52,6 @@ class BTCVSliceDataset(Dataset):
 
                 if np.any(lbl_slice == organ_id):
                     gt_mask = (lbl_slice == organ_id).astype(np.uint8)
-
                     img_slice = to_rgb(vol_img_u8[:, :, z])
 
                     img_pil = Image.fromarray(img_slice).resize(
@@ -70,7 +65,6 @@ class BTCVSliceDataset(Dataset):
                     resized_gt = np.array(gt_pil, dtype=np.uint8)
 
                     bbox = bbox_from_mask(resized_gt, pad=4)
-
                     if bbox is None:
                         continue
 
@@ -81,11 +75,7 @@ class BTCVSliceDataset(Dataset):
 
     def __getitem__(self, idx):
         img_arr, gt_arr, box_arr = self.samples[idx]
-
         img_tensor = torch.from_numpy(img_arr).to(torch.float32) / 255.0
-
         gt_tensor = torch.from_numpy(gt_arr).to(torch.float32)
-
         box_tensor = torch.from_numpy(box_arr).to(torch.float32)
-
         return img_tensor, gt_tensor, box_tensor
