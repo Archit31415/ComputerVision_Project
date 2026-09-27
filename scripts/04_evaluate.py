@@ -94,10 +94,10 @@ def main():
     print(f"Per-case CSV saved -> {csv_path}")
 
     # Print reference baselines from the literature
-    baselines = {6: "~0.93", 1: "~0.94", 11: "~0.72"}
-    if args.organ in baselines:
-        print(f"\nPublished SAM2 zero-shot baseline for organ {args.organ}: "
-              f"DSC {baselines[args.organ]}")
+    # baselines = {6: "~0.93", 1: "~0.94", 11: "~0.72"}
+    # if args.organ in baselines:
+    #     print(f"\nPublished SAM2 zero-shot baseline for organ {args.organ}: "
+    #           f"DSC {baselines[args.organ]}")
 
 
 if __name__ == "__main__":

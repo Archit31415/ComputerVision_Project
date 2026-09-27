@@ -1,5 +1,6 @@
 from src.engine.memory_bank import ShortLongMemoryBank
-
+import numpy as np
+from PIL import Image
 
 def propagate_bidirectional(
     predictor, state, start_z, bbox, target_hw=None, min_area_pixels=5, k_slices=3

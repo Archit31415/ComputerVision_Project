@@ -59,9 +59,9 @@ def main():
     out_dir    = Path("outputs") / args.case
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Step 1: Write PNG frames (if not already on disk) ────────────────────
-    if not frames_dir.exists() or not any(frames_dir.glob("*.png")):
-        print("Writing PNG frames...")
+    # ── Step 1: Write JPEG frames (if not already on disk) ───────────────────
+    if not frames_dir.exists() or not any(frames_dir.glob("*.jpg")):
+        print("Writing JPEG frames...")
         write_frames_png(str(img_path), str(frames_dir))
 
     # ── Step 2: Load volume + labels ─────────────────────────────────────────
@@ -87,7 +87,7 @@ def main():
     # Optionally load LoRA adapter (produced by Week 4 training)
     if args.lora:
         import torch
-        ckpt = torch.load(args.lora, map_location="cuda")
+        ckpt = torch.load(args.lora, map_location="cpu")
         
         # Dynamically detect and inject active adapters based on checkpoint keys
         has_sd = any("sd_adapter" in k for k in ckpt.keys())
@@ -96,25 +96,25 @@ def main():
 
         if has_sd:
             from src.train.adapters import inject_sd_adapters
-            predictor.model.image_encoder = inject_sd_adapters(predictor.model.image_encoder)
+            predictor.image_encoder = inject_sd_adapters(predictor.image_encoder)
         
         if has_peft:
             from src.train.lora import add_lora_peft
-            predictor.model.image_encoder = add_lora_peft(
-                predictor.model.image_encoder,
+            predictor.image_encoder = add_lora_peft(
+                predictor.image_encoder,
                 r=cfg["train"]["rank"],
                 alpha=cfg["train"]["alpha"]
             )
         elif has_custom_qv:
             from src.train.lora import inject_lora_qv
-            predictor.model.image_encoder = inject_lora_qv(
-                predictor.model.image_encoder,
+            predictor.image_encoder = inject_lora_qv(
+                predictor.image_encoder,
                 r=cfg["train"]["rank"],
                 alpha=cfg["train"]["alpha"]
             )
 
-        predictor.model.image_encoder.load_state_dict(ckpt, strict=False)
-        predictor.model.to("cuda")
+        predictor.image_encoder.load_state_dict(ckpt, strict=False)
+        predictor.to("cpu")
         print(f"Loaded LoRA adapter from {args.lora}")
 
     # ── Step 4: Initialise video state ───────────────────────────────────────

@@ -19,8 +19,8 @@ def _load_predictor(cfg, lora_path=None):
     Specification:
     - predictor = build_predictor(cfg["model"]["cfg"], cfg["model"]["ckpt"])
     - If lora_path is not None and the file exists:
-          adapter = torch.load(lora_path, map_location="cuda")
-          predictor.model.image_encoder.load_state_dict(adapter, strict=False)
+          adapter = torch.load(lora_path, map_location="cpu")
+          predictor.image_encoder.load_state_dict(adapter, strict=False)
     - Return predictor.
 
     Args:
@@ -35,7 +35,7 @@ def _load_predictor(cfg, lora_path=None):
     if lora_path is not None:
         lora_file = Path(lora_path)
         if lora_file.exists():
-            adapter = torch.load(lora_file, map_location="cuda")
+            adapter = torch.load(lora_file, map_location="cpu")
             
             # Dynamically detect and inject active adapters based on checkpoint keys
             has_sd = any("sd_adapter" in k for k in adapter.keys())
@@ -44,25 +44,25 @@ def _load_predictor(cfg, lora_path=None):
 
             if has_sd:
                 from src.train.adapters import inject_sd_adapters
-                predictor.model.image_encoder = inject_sd_adapters(predictor.model.image_encoder)
+                predictor.image_encoder = inject_sd_adapters(predictor.image_encoder)
             
             if has_peft:
                 from src.train.lora import add_lora_peft
-                predictor.model.image_encoder = add_lora_peft(
-                    predictor.model.image_encoder,
+                predictor.image_encoder = add_lora_peft(
+                    predictor.image_encoder,
                     r=cfg["train"]["rank"],
                     alpha=cfg["train"]["alpha"]
                 )
             elif has_custom_qv:
                 from src.train.lora import inject_lora_qv
-                predictor.model.image_encoder = inject_lora_qv(
-                    predictor.model.image_encoder,
+                predictor.image_encoder = inject_lora_qv(
+                    predictor.image_encoder,
                     r=cfg["train"]["rank"],
                     alpha=cfg["train"]["alpha"]
                 )
 
-            predictor.model.image_encoder.load_state_dict(adapter, strict=False)
-            predictor.model.to("cuda")
+            predictor.image_encoder.load_state_dict(adapter, strict=False)
+            predictor.to("cpu")
 
     return predictor
 
@@ -148,8 +148,16 @@ def evaluate_organ(cfg, organ_id, lora_path=None):
         if not img_path.exists() or not lbl_path.exists():
             continue
 
-        if not frames_dir.exists() or not any(frames_dir.iterdir()):
-            write_frames_png(img_path, frames_dir)
+        do_resample = cfg.get("preprocess", {}).get("resample_isotropic", False)
+        target_spacing = cfg.get("preprocess", {}).get("target_spacing_mm", 1.5)
+
+        if not frames_dir.exists() or not any(frames_dir.glob("*.jpg")):
+            write_frames_png(
+                img_path,
+                frames_dir,
+                do_resample=do_resample,
+                target_spacing=target_spacing,
+            )
 
         vol, _, spacing = load_volume(img_path)
         lbl, _, _ = load_volume(lbl_path)

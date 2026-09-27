@@ -27,10 +27,10 @@ def write_frames_png(nifti_path, out_dir, do_resample=False, target_spacing=1.5)
         
         slice_rgb = to_rgb(slice_2d)
         
-        frame_name = f"{z:05d}.png"
+        frame_name = f"{z:05d}.jpg"
         frame_path = out_dir / frame_name
         
-        Image.fromarray(slice_rgb).save(frame_path)
+        Image.fromarray(slice_rgb).save(frame_path, quality=95)
 
     return z_depth
 
@@ -39,7 +39,7 @@ def frames_to_arrays(frames_dir):
     """Load all PNG frames from a folder into a single uint8 numpy array.
 
     Specification:
-    - Read every .png in frames_dir in sorted (filename) order.
+    - Read every .jpg in frames_dir in sorted (filename) order.
     - Stack along a new leading axis → shape (Z, H, W, 3).
 
     Args:
@@ -51,7 +51,7 @@ def frames_to_arrays(frames_dir):
 
     frames_dir = Path(frames_dir)
     
-    frame_paths = sorted(frames_dir.glob("*.png"))
+    frame_paths = sorted(frames_dir.glob("*.jpg"))
     
     if not frame_paths:
         return np.empty((0, 0, 0, 3), dtype=np.uint8)
